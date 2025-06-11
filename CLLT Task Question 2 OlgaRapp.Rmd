@@ -1,0 +1,139 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r Load Libraries}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+```
+
+```{r Q2.a Create Example Data Table}
+## looked for similar tables to understand the question 
+#https://jamanetwork.com/journals/jamanetworkopen/fullarticle/2791533
+#https://pubmed.ncbi.nlm.nih.gov/39504023/
+#https://pmc.ncbi.nlm.nih.gov/articles/PMC11541642/
+
+
+set.seed(123)
+
+# Define parameters
+calendar_dates <- seq.Date(from = as.Date("2025-05-01"), to = as.Date("2025-05-21"), by = "day")
+age_groups <- c("<18","18-39", "40-64", "65+")
+sexes <- c("M", "F")
+races <- c("White", "Black","Hispanic","Asian","Two or more reces", "Other")
+clinics <- c("Clinic One", "Clinic Two")
+
+# combination of strata and calendar days
+data_table <- expand.grid(
+  Calendar_Date = calendar_dates,
+  Age_Group = age_groups,
+  Sex = sexes,
+  Race = races,
+  Clinic = clinics,
+  Risk_Window = c('1-21 days','22-42 days')
+  #Risk_Type = c("risk", "comparison")
+)
+
+# Random person-days and outcome events
+data_table <- data_table %>%
+  mutate(
+    Person_Days = sample(500:1000, n(), replace = TRUE),
+    Outcome_Events = rpois(n(), lambda = ifelse(Risk_Window == '1-21 days', 2.5, 1.5))
+  )
+
+# View example rows
+head(data_table)
+
+df <- data_table # work on df, data_table stays as it is for any reference
+
+```
+
+
+
+```{r Q2.a plot to visualize the cumulative incidence of the targeted outcomes}
+
+# Aggregate daily outcome events by interval type
+daily_counts <- df %>%
+  group_by(Calendar_Date, Risk_Window) %>%
+  summarise(Outcome_Events = sum(Outcome_Events), .groups = "drop") %>%
+  arrange(Calendar_Date)
+
+# Calculate cumulative outcome counts over time
+Cumulative_Incidence <- daily_counts %>%
+  group_by(Risk_Window) %>%
+  arrange(Calendar_Date) %>%
+  mutate(Cumulative_Events = cumsum(Outcome_Events))
+
+# Plot cumulative incidence
+ggplot(Cumulative_Incidence, aes(x = Calendar_Date, y = Cumulative_Events, color = Risk_Window)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Cumulative Incidence of Outcome Events by Interval Type",
+    pval = TRUE,
+    x = "Calendar Date",
+    y = "Cumulative Number of Events",
+    color = "Interval Type"
+  ) +
+  theme_minimal(base_size = 14)
+```
+```{r Q2.b Poison Model}
+# Fitting Poison Model 
+Pois_model <- glm(Outcome_Events ~ Risk_Window,offset = log(Person_Days),family = poisson(link = "log"),data = df)
+summary(Pois_model)
+
+# Extracting coefficient and compute Rate Ratio
+coef_est <- coef(Pois_model)["Risk_Window22-42 days"]
+rate_ratio <- exp(coef_est)
+
+# Print result
+cat("Rate Ratio (22–42 days vs 1–21 days):", round(rate_ratio, 2), "\n")
+```
+
+
+```{r Q2.c Add Required Columns for Conditional Logistic Regression}
+
+# Creating binary outcome
+df <- df %>%
+  mutate(Outcome_Bin = ifelse(Outcome_Events > 0, 1, 0))
+
+# Creating unique strata based on CDC matching criteria
+df <- df %>%
+  mutate(Stratum_ID = paste(Calendar_Date, Age_Group, Sex, Race, Clinic, sep = "_"))
+
+
+df %>% select(Stratum_ID, Risk_Window, Outcome_Bin) %>% head()
+```
+
+```{r Q2.c Conditional Logistic Regression}
+
+# Making sure Risk_Window is a factor
+df$Risk_Window <- factor(df$Risk_Window, levels = c("1-21 days", "22-42 days"))
+
+# Fitting the conditional logistic regression
+clogit_model <- clogit(Outcome_Bin ~ Risk_Window + strata(Stratum_ID), data = df)
+
+summary(clogit_model)
+
+# Extracting coefficient and CI from clogit coxph model
+
+summary_model <- summary(clogit_model)
+coef_est <- summary_model$coefficients["Risk_Window22-42 days", "coef"]
+or <- exp(coef_est)
+
+# 95% CI
+lower_ci <- summary_model$conf.int["Risk_Window22-42 days", "lower .95"]
+upper_ci <- summary_model$conf.int["Risk_Window22-42 days", "upper .95"]
+
+# Print
+cat("Odds Ratio (22–42 vs 1–21 days):", round(or, 2),
+    "[95% CI:", round(lower_ci, 2), "–", round(upper_ci, 2), "]\n")
+
+```
+
+
+```{r}
+cat("\n All done with Question 2! Vaccine safety methods compared and results interpreted. \n")
+cat("\n Thank you for taking the time to review this task. \n")
+```
+

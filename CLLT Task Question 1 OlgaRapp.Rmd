@@ -1,0 +1,370 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r Load Libraries}
+library("readr")
+library("dplyr")
+library("ggplot2")
+library("mice")
+library("binom")
+library("broom")
+
+
+library("data.table")
+library("tableone")
+library("flextable")
+library("gtsummary")
+
+library("survival")
+library("survminer")
+library(rms)
+
+library(pROC)
+```
+
+```{r Data file}
+Data <- read.csv("C:\\Users\\Olga_\\OneDrive\\Documents\\Olga Documents\\my projects and summary\\showcase tasks\\CLLT\\diabetes.csv",stringsAsFactors = FALSE)
+
+df <- Data # work on df dataframe, Data stays compleet
+
+# Here is the code to add the additional columns to df 
+# Convert futime from days to years
+df$futime_years <- df$futime / 365.25
+
+# Re-specify data in rms format
+dd <- datadist(df); options(datadist = "dd")
+
+# Define the binary outcome: diabetes within 5 years
+df$diabetes_5y <- ifelse(df$status == 1 & df$futime_years <= 5, 1, 0)
+```
+
+
+```{r Data exploration}
+# Basic summary
+cat("Total rows:", nrow(df), "\n")
+cat("Duplicate rows:", sum(duplicated(df)), "\n\n")  # this works correctly on data frames
+
+# Data type and missing value summary
+summary_df <- data.frame(
+  Column = names(df),
+  DataType = sapply(df, class),
+  MissingValues = sapply(df, function(x) sum(is.na(x))),
+  IsDouble = sapply(df, function(x) is.double(x))
+)
+
+# Count missing values in weight, height, or bmi
+missing_rows <- df[is.na(df$weight) | is.na(df$height) | is.na(df$bmi), ]
+
+# Total rows with any missing in weight/height/bmi
+n_missing <- nrow(missing_rows)
+
+# Total number of rows in dataset
+n_total <- nrow(df)
+
+# Number of complete rows
+n_complete <- n_total - n_missing
+
+# Print summary
+cat("Total rows:", n_total, "\n")
+cat("Rows with any missing (weight/height/bmi):", n_missing, "\n")
+cat("Rows with complete weight, height, and bmi:", n_complete, "\n")
+
+Dup_df <- df[duplicated(df),]
+
+print(summary_df)
+print(Dup_df)
+```
+
+
+```{r Missing values NOT USED}
+# Important note- I decided not to use imputed values since that may add inaccuracy later and the cohort is still large enough, but the code is still here to enable examine my way of thinking.
+###
+# Deal with missing values, missing values are numeric (integer and numeric)
+# Many missing values in those columns, will not delete is because these rows or columns can be #lost for other attributes it they are deleted. 
+#add additional df with imputed data in case it is needed in future
+# No duplicated values
+
+# Check missing data pattern
+md.pattern(df)
+# Perform imputation using predictive mean matching # using regression
+imputed_data <- mice(df, method = "pmm", m = 5, seed = 123)
+# Complete the data with the first imputed dataset
+df_imputed <- complete(imputed_data, 1)
+# Optional: View a summary
+summary(df_imputed)
+
+
+# Data type and missing value summary
+summary_df_imputed <- data.frame(
+  ColumnImput = names(df_imputed),
+  DataTypeImput = sapply(df_imputed, class),
+  MissingValuesImput = sapply(df_imputed, function(x) sum(is.na(x))),
+  IsDoubleImput = sapply(df_imputed, function(x) is.double(x))
+)
+
+print(summary_df_imputed)
+```
+
+```{r Basleline Characteristics}
+
+df_model <- df[complete.cases(df[, c("age", "male", "weight", "height", "bmi", "type")]), ]
+
+# variables
+vars <- c("age", "male", "weight", "height", "bmi","futime_years","status","type")
+
+# Table One summary (no group yet)
+table1 <- CreateTableOne(vars = vars, data = df_model, factorVars = c("male","status","type"))
+
+# Print summary
+print(table1, showAllLevels = TRUE)
+table1_df <- print(table1, printToggle = FALSE)
+View(table1_df)
+#write.csv(table1_df, "C:\\Users\\Olga_\\OneDrive\\Documents\\Olga Documents\\my projects and #summary\\showcase tasks\\CLLT\\Visuals\\baseline_characteristics.csv", row.names = TRUE)
+```
+
+
+```{r Follow up time}
+#Plot
+ggplot(df, aes(x = futime / 365.25)) +
+  geom_histogram(binwidth = 0.5, fill = "steelblue", color = "white") +
+  xlab("Follow-Up Time (Years)") +
+  ylab("Number of Patients") +
+  ggtitle("Distribution of Follow-Up Time") +
+  theme_minimal()
+
+```
+
+
+
+```{r Q1.a 5-year risk of developing diabetes }
+
+# general KM model
+# Fit the Kaplan-Meier model
+km_fit <- survfit(Surv(futime_years, status) ~ 1, data = df)
+
+## 5 years cumulative risk 
+
+# Proportion diagnosed with diabetes within 5 years
+km_summary <- summary(km_fit, times = 5)
+
+# Survival probability and  95% CI
+surv_5y  <- km_summary$surv                  
+surv_5y_lower <- km_summary$lower           # Lower CI for S(5)
+surv_5y_upper <- km_summary$upper           # Upper CI for S(5)
+
+# Convert to cumulative incidence (1 - S(t))
+risk_5y <- 1 - surv_5y
+risk_5y_lower <- 1 - surv_5y_upper   # Note: upper survival = lower risk
+risk_5y_upper <- 1 - surv_5y_lower   # Note: lower survival = upper risk
+
+# Plot the KM curve (time to diabetes)
+km_plot <- ggsurvplot(
+  km_fit,
+  xlab = "Years Since Pre-Diabetes Diagnosis",
+  ylab = "Proportion Without Diabetes",
+  title = "Kaplan-Meier Curve: Time to Diabetes Diagnosis",
+  #surv.scale = "percent",
+  conf.int = TRUE,
+  conf.int.style = "ribbon",
+  conf.int.alpha = 0.2,
+  palette = c("#2E9FDF"),
+  ggtheme = theme_classic(),
+  break.x.by = 5,
+  break.y.by = 0.2,           
+  risk.table = TRUE,
+  risk.table.title = "Patients at Risk",
+  risk.table.y.text.col = TRUE,
+  risk.table.height = 0.25,
+  font.main = c(16, "bold"),
+  font.x = c(14, "plain"),
+  font.y = c(14, "plain"),
+  font.tickslab = c(12, "plain"),
+  risk.table.fontsize = 4,
+  legend = "none"
+)
+
+# 5Y Proportion value annotation
+#line
+km_plot$plot <- km_plot$plot +
+  geom_vline(xintercept = 5, linetype = "dashed", color = "grey40") +
+  geom_hline(yintercept = surv_5y, linetype = "dashed", color = "grey40")
+# annotation
+km_plot$plot <- km_plot$plot +
+  annotate("text", x = max(km_fit$time) * 0.7, y = surv_5y + 0.03,
+           label = paste0("~", round(surv_5y,2), " without DM at 5 years"),
+           size = 4, color = "grey30")
+
+print(km_plot)
+
+# Print 
+cat("Estimated 5-Year Risk of Diabetes:", round(risk_5y * 100, 2), "%\n")
+cat("95% Confidence Interval:", round(risk_5y_lower * 100, 2), "% -", round(risk_5y_upper * 100, 2), "%\n")
+
+
+# Pts censored before 5 years (status == 0)
+censored_lt_5y <- df$status == 0 & df$futime_years < 5
+
+# Total number of patients
+total_patients <- nrow(df)
+
+# Number and proportion of censored pts before 5 years
+n_censored <- sum(censored_lt_5y)
+prop_censored <- round(n_censored / total_patients * 100, 2)
+
+# Print 
+cat("Censored before 5 years:", n_censored, "\n")
+cat("Total patients:", total_patients, "\n")
+cat("Proportion censored before 5 years:", prop_censored, "%\n")
+```
+
+
+```{r Q1.b and 1.d factors associated with elevated risk and model performance score}
+
+# Keeping only rows complete for variables used in the model
+df_Cox_model <- df[complete.cases(df[, c("age", "male", "weight", "height", "bmi", "type")]), ]
+
+# Fit Cox model with related variables
+cox_model <- coxph(Surv(futime_years, status) ~ age + male + weight + height + bmi + type, data = df_Cox_model)
+
+# View model summary
+cox_sum <-summary(cox_model)
+cox_sum
+
+ggforest(cox_model, data = df_Cox_model)
+```
+
+
+```{r Q1.c predicted 5-year risk of a person with the same characteristics as subject number 1}
+
+# Get subject #1's covariates (excluding futime and status)
+
+subject1 <- df_Cox_model[1,]
+
+# Predict survival function for subject #1
+surv_pred <- survfit(cox_model, newdata = subject1)
+
+# Survival probability at 5 years
+Surv_5y <- summary(surv_pred, times = 5)$surv
+risk_5y <- 1 - Surv_5y
+
+# CI calc
+
+#lp <- predict(cox_model, newdata = subject1, se.fit = TRUE, type = "lp")
+#se <- lp$se.fit
+#surv_5y <- summary(surv_pred, times = 5)$surv
+#ci_upper <- 1 - (surv_5y ^ exp(lp$fit - 1.96 * se)) #Lower CI
+#ci_lower <- 1 - (surv_5y ^ exp(lp$fit + 1.96 * se)) #Upper CI
+
+# Result
+#cat("Predicted 5-year risk for subject #1:", round(risk_5y * 100, 2), "%\n")
+#cat("CI of the Predicted 5-year risk for subject #1:", round(ci_upper * 100, 2), "%-" ,round(ci_lower * 100, 2), "%\n")
+
+```
+
+
+```{r Q1.d alternative model - Logistic Regression}
+
+#Data frame for the model, with complete case filtering
+
+df_log_model <- df[complete.cases(df[, c("age", "male", "weight", "height", "bmi", "type", "diabetes_5y")]), ]
+
+
+#logistic regression model
+
+log_model <- glm(diabetes_5y ~ age + male + weight + height + bmi + type, 
+                 data = df_log_model, family = "binomial")
+summary(log_model)
+
+# Tidy logistic regression output and exponentiation to get odds ratios
+log_tidy <- tidy(log_model, conf.int = TRUE, exponentiate = TRUE)
+
+ggplot(log_tidy[-1, ], aes(x = term, y = estimate)) +  # remove intercept
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray") +
+  coord_flip() +
+  ylab("Odds Ratio (95% CI)") +
+  xlab("") +
+  ggtitle("Logistic Regression: Odds Ratios for 5-Year Diabetes Risk") +
+  theme_minimal()
+
+
+
+
+# logistic model for patient number 1 (subject#1)
+
+# Predict log-odds and standard error for subject #1
+pt1_pred_logit <- predict(log_model, newdata = subject1, se.fit = TRUE, type = "link")
+
+# Compute 95% CI on logit scale
+logit_lower <- pt1_pred_logit$fit - 1.96 * pt1_pred_logit$se.fit
+logit_upper <- pt1_pred_logit$fit + 1.96 * pt1_pred_logit$se.fit
+
+# Transform to probability scale
+prob_estimate <- plogis(pt1_pred_logit$fit)
+prob_lower <- plogis(logit_lower)
+prob_upper <- plogis(logit_upper)
+
+# Print nicely
+cat("Predicted 5-year risk:", round(prob_estimate * 100, 2), "%\n")
+cat("95% CI: [", round(prob_lower * 100, 2), "% -", round(prob_upper * 100, 2), "%]\n")
+
+
+## Logistic Model Estimation ROC and AUC
+
+# Calculate ROC curve
+roc_obj <- roc(df_log_model$diabetes_5y, predict(log_model, type = "response"))
+
+# Plot with ggplot
+ggroc(roc_obj) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  ggtitle("ROC Curve: Logistic Regression Model") +
+  xlab("1 - Specificity") +
+  ylab("Sensitivity") +
+  annotate("text", x = 0.65, y = 0.1,
+           label = paste("AUC =", round(auc(roc_obj), 3)),
+           hjust = 0, size = 4.5) +
+  theme_minimal(base_size = 14)
+```
+
+
+```{r Q1.g Treatment B}
+### important note, this section deals with Q1.g after Q1.e, that is because the Q1.f directs to visualization of the previous sections. However, I have incorporated visualization to each section separately.
+
+### Q1.g is treatment B better than treatment A in preventing diabetes 
+### Cox model for comparison by type (type A = 0, Type B = 1)
+
+## KM model for comparison by type (treatment A and B)
+km_fit_type <- survfit(Surv(futime_years, status) ~ type, data = df)
+
+ggsurvplot(
+  km_fit_type,
+  conf.int = TRUE,
+  pval = TRUE,
+  xlab = "Years Since Pre-Diabetes Diagnosis",
+  ylab = "Proportion Not Diagnosed with Diabetes",
+  title = "Kaplan-Meier Curve by Treatment Type",
+  legend.labs = c("Treatment A", "Treatment B"),
+  risk.table = TRUE,
+  risk.table.title = "Patients at Risk",
+  risk.table.y.text.col = TRUE,
+  risk.table.height = 0.3
+)
+
+
+survdiff(Surv(futime_years, status) ~ type, data = df)
+
+# Adjusted cox model
+cox_model_type <- coxph(Surv(futime_years, status) ~ type + age + male + weight + height + bmi, data = df_Cox_model)
+summary(cox_model_type)
+ggforest(cox_model_type, data = df_Cox_model)
+```
+
+
+```{r}
+cat("\n All done with Question 1! Onward to the next challenge.\n")
+```
+
