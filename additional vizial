@@ -1,0 +1,25 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from lifelines import KaplanMeierFitter
+
+# Simulate example data
+np.random.seed(42)
+n = 200
+df = pd.DataFrame({
+    'futime_years': np.random.exponential(scale=5, size=n),  # time to event
+    'status': np.random.binomial(1, 0.7, size=n),             # 1 = event occurred, 0 = censored
+})
+
+# Kaplan-Meier model
+kmf = KaplanMeierFitter()
+kmf.fit(durations=df['futime_years'], event_observed=df['status'])
+
+# Plot
+plt.figure(figsize=(8, 5))
+kmf.plot_survival_function()
+plt.title("Kaplan-Meier Survival Curve")
+plt.xlabel("Time (years)")
+plt.ylabel("Survival Probability")
+plt.grid(True)
+plt.show()
