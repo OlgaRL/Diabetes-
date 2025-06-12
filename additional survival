@@ -1,0 +1,40 @@
+### 🔹 1. Kaplan-Meier Model (KM)
+```r
+library(survival)
+# KM model - overall survival
+km_fit <- survfit(Surv(futime_years, status) ~ 1, data = df)
+summary(km_fit, times = 5)  # Get 5-year survival probability
+```
+---
+
+### 🔹 2. Cox Proportional Hazards Model (CoxPH)
+```r
+# Cox model with covariates (e.g., age, sex, bmi)
+cox_model <- coxph(Surv(futime_years, status) ~ age + male + bmi + type, data = df_model)
+summary(cox_model)
+```
+---
+
+### 🔹 3. Parametric Survival Model (e.g., Weibull)
+```r
+# Using the flexsurv package
+library(flexsurv)
+weibull_model <- flexsurvreg(Surv(futime_years, status) ~ age + male + bmi + type, data = df_model, dist = "weibull")
+summary(weibull_model)
+```
+---
+
+### 🔹 4. Competing Risks Model (Fine-Gray)
+```r
+library(cmprsk)
+# Assuming "status" = 1 for event of interest, 2 for competing risk
+fg_model <- crr(ftime = df$time, fstatus = df$status, cov1 = df[, c("age", "male", "bmi", "type")])
+summary(fg_model)
+```
+---
+
+### 🔹 5. Accelerated Failure Time (AFT) Model
+```r
+aft_model <- survreg(Surv(futime_years, status) ~ age + male + bmi + type, data = df_model, dist = "weibull")
+summary(aft_model)
+```
