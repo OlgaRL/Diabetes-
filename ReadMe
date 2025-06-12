@@ -1,0 +1,103 @@
+Diabetes Assignment – Question 1: Comprehensive Survival Analysis Guide
+=========================================================================
+
+This document summarizes the key concepts, methods, and models used to answer Question 1 of the diabetes assignment, 
+along with simplified explanations, model assumptions, and illustrative code references.
+
+---------------------------------------------------
+1. Kaplan-Meier (KM) Model
+---------------------------------------------------
+- Purpose: Estimate the probability of survival over time from a specific event (e.g., diabetes diagnosis).
+- Type: Non-parametric model (makes no assumption about distribution).
+- Input: Time-to-event (futime_years), event indicator (status).
+- Code: 
+    km_fit <- survfit(Surv(futime_years, status) ~ 1, data = df)
+
+- Assumptions:
+  • Independent censoring
+  • Event times are exact
+  • Subjects are representative of the population
+
+- What is censoring?
+  Censoring means we don’t observe the outcome for some patients during the study period (e.g., patient dropped out or study ended before diabetes occurred).
+
+- Example Interpretation:
+  If KM shows a 5-year diabetes-free survival probability of 94.91%, then the estimated 5-year diabetes RISK is 100% - 94.91% = 5.09%.
+
+---------------------------------------------------
+2. Cox Proportional Hazards Model
+---------------------------------------------------
+- Purpose: Identify variables associated with the time to diabetes onset.
+- Type: Semi-parametric (no assumption on baseline hazard).
+- Code:
+    cox_model <- coxph(Surv(futime_years, status) ~ age + male + weight + height + bmi + type, data = df_model)
+
+- Assumptions:
+  • Proportional hazards (HR is constant over time)
+  • Linearity of covariates on the log-hazard
+  • Independent censoring
+
+- What is a Hazard?
+  A hazard is the risk of the event occurring at a specific time, given survival until that time.
+  Hazard Ratio (HR) > 1: Higher risk
+  HR < 1: Lower risk
+  HR = 1: No effect
+
+- Model Output Example:
+  type = 1 (treatment B) has HR = 1.39 → suggests 39% higher hazard than type A
+
+---------------------------------------------------
+3. Logistic Regression Model
+---------------------------------------------------
+- Purpose: Predict the probability of diabetes within 5 years (binary outcome).
+- Code:
+    df$diabetes_5y <- ifelse(df$futime_years <= 5 & df$status == 1, 1, 0)
+    logit_model <- glm(diabetes_5y ~ age + male + weight + height + bmi + type, data = df_model, family = "binomial")
+
+- Assumptions:
+  • Linear relationship between log-odds and predictors
+  • Independence of observations
+  • Sufficient sample size
+
+- Limitation:
+  Logistic regression does not account for censoring or time-to-event. A person diagnosed at 3 years and another at 5.1 years are treated differently.
+
+---------------------------------------------------
+4. Parametric Survival Models (Optional Alternatives)
+---------------------------------------------------
+- Types: Weibull, Gompertz, Log-normal, Exponential
+- Purpose: Estimate hazard and survival functions under distributional assumptions.
+- Useful when the hazard function has a known shape (increasing/decreasing risk).
+
+- Weibull Distribution:
+  Flexible model used when hazard changes over time. Common in biomedical research.
+
+- Gompertz:
+  Often used in aging or mortality studies. Assumes exponential increase in hazard with age.
+
+- Log-normal:
+  Assumes the logarithm of survival time follows a normal distribution.
+
+- Assumptions: Each has specific shape assumptions (e.g., constant, increasing, or decreasing hazard).
+
+---------------------------------------------------
+5. Additional Notes
+---------------------------------------------------
+- complete.cases() in R: removes rows with missing values in specified columns.
+
+- Censoring: Must be considered in survival models like KM and Cox; not handled in logistic regression.
+
+- Concordance Index (C-index): A measure of model’s ability to correctly rank event times; e.g., 0.76 means 76% correct order.
+
+- Confidence Interval: Can be computed from survival models using summary(survfit(...))$surv and upper/lower bounds.
+
+- Choosing Between Models:
+  • KM: Good for describing time to event, no covariates.
+  • Cox: Best for identifying risk factors, allows adjustment.
+  • Logistic: Simpler but ignores time and censoring.
+  • Parametric: Efficient if distributional assumptions are correct.
+
+---------------------------------------------------
+Summary of Best Practice:
+---------------------------------------------------
+Use KM for descriptive risk over time. Use Cox if covariates are important and data is censored. Use Logistic only when time-to-event is not available or important.
